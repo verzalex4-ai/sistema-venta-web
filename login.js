@@ -87,7 +87,7 @@ function handleLogin(event) {
             
             setTimeout(function() {
                 console.log('Ejecutando redirección...');
-                window.location.replace('dashboard.php');
+                window.location.replace(data.redirect);
             }, 1000);
             
         } else {
