@@ -522,12 +522,6 @@ while ($row = $result_categorias->fetch_assoc()) {
             </li>
             <hr class="sidebar-divider" style="border-color: rgba(255,255,255,.2)">
             <li class="nav-item">
-                <a class="nav-link" href="index.php" target="_blank">
-                    <i class="fas fa-fw fa-store"></i><span>Ver Catálogo Público</span>
-                </a>
-            </li>
-            <hr class="sidebar-divider" style="border-color: rgba(255,255,255,.2)">
-            <li class="nav-item">
                 <a class="nav-link" href="reportes.php">
                     <i class="fas fa-fw fa-chart-area"></i><span>Reportes</span>
                 </a>
