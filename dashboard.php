@@ -480,13 +480,8 @@ while ($row = $result_categorias->fetch_assoc()) {
             </li>
             <?php endif; ?>
             
-            <?php if (tiene_permiso('proveedores')): ?>
-            <li class="nav-item">
-                <a class="nav-link" href="proveedores.php">
-                    <i class="fas fa-fw fa-truck"></i><span>Proveedores</span>
-                </a>
-            </li>
-            <?php endif; ?>
+                <?php if (tiene_permiso('proveedores')): ?>
+                <?php endif; ?>
             
             <hr class="sidebar-divider" style="border-color: rgba(255,255,255,.2)">
             <div class="sidebar-heading" style="color: rgba(255,255,255,.5); padding: 0 1rem; font-size: 0.65rem; text-transform: uppercase; margin-top: 0.5rem;">Operaciones</div>

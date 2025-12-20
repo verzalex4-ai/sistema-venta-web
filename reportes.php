@@ -225,7 +225,7 @@ while ($row = $result_metodos_pago->fetch_assoc()) {
             </a>
             <hr class="sidebar-divider my-0" style="border-color: rgba(255,255,255,.2)">
             <li class="nav-item">
-                <a class="nav-link" href="index.php">
+                <a class="nav-link" href="dashboard.php">
                     <i class="fas fa-fw fa-tachometer-alt"></i><span>Dashboard</span>
                 </a>
             </li>
@@ -241,11 +241,7 @@ while ($row = $result_metodos_pago->fetch_assoc()) {
                     <i class="fas fa-fw fa-users"></i><span>Clientes</span>
                 </a>
             </li>
-            <li class="nav-item">
-                <a class="nav-link" href="proveedores.php">
-                    <i class="fas fa-fw fa-truck"></i><span>Proveedores</span>
-                </a>
-            </li>
+            
             <hr class="sidebar-divider" style="border-color: rgba(255,255,255,.2)">
             <div class="sidebar-heading">Operaciones</div>
             <li class="nav-item">

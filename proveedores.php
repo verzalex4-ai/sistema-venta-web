@@ -186,7 +186,7 @@ $result_proveedores = $conn->query($sql_proveedores);
             </a>
             <hr class="sidebar-divider my-0" style="border-color: rgba(255,255,255,.2)">
             <li class="nav-item">
-                <a class="nav-link" href="index.php">
+                <a class="nav-link" href="dashboard.php">
                     <i class="fas fa-fw fa-tachometer-alt"></i><span>Dashboard</span>
                 </a>
             </li>
