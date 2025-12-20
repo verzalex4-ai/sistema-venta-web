@@ -1,0 +1,54 @@
+# Archivos de configuración local
+config.php
+
+# Imágenes subidas por usuarios
+uploads/
+
+# Archivos temporales de setup (ya ejecutados)
+setup_categorias.php
+limpiar_categorias.php
+
+# Logs y cache
+*.log
+*.cache
+.DS_Store
+Thumbs.db
+
+# Archivos de IDE
+.vscode/
+.idea/
+*.code-workspace
+
+# Archivos de sistema operativo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Archivos de backup
+*.bak
+*.backup
+*.old
+*~
+
+# Archivos temporales de PHP
+*.tmp
+temp/
+tmp/
+
+# Documentación de instalación (opcional - puedes mantenerla)
+# INSTALAR_CON_DOCKER.md
+# INSTALAR_CON_LARAGON.md
+# INSTALAR_SIN_NADA.md
+
+# Docker (si no lo usás)
+docker-compose.yml
+Dockerfile
+
+# Variables de entorno (si las usás en el futuro)
+.env
+.env.local
+.env.production
+
+# Dependencias (si usás Composer en el futuro)
+vendor/
+composer.lock
