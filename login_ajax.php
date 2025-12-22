@@ -1,82 +1,104 @@
 <?php
 /**
- * Login AJAX limpio y estable
+ * LOGIN AJAX - Versión simplificada y segura
  */
 
+// Desactivar output de errores para JSON limpio
 error_reporting(0);
 ini_set('display_errors', 0);
 
+// Headers para JSON
 header('Content-Type: application/json; charset=utf-8');
+header('Cache-Control: no-cache, must-revalidate');
 
 require_once 'config.php';
 
+// Función para responder
+function responder($success, $message, $data = []) {
+    echo json_encode(array_merge([
+        'success' => $success,
+        'message' => $message
+    ], $data), JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
 try {
-    // Verificar método
+    // Verificar método POST
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-        throw new Exception('Método no permitido');
+        responder(false, 'Método no permitido');
     }
 
-    // Verificar POST
-    if (!isset($_POST['usuario'], $_POST['password'])) {
-        throw new Exception('Datos incompletos');
+    // Obtener y validar datos
+    $usuario = trim($_POST['usuario'] ?? '');
+    $password = $_POST['password'] ?? '';
+
+    if (empty($usuario) || empty($password)) {
+        responder(false, 'Por favor completa todos los campos');
     }
 
-    $usuario = trim($_POST['usuario']);
-    $password = $_POST['password'];
-
-    if ($usuario === '' || $password === '') {
-        throw new Exception('Completa todos los campos');
-    }
-
-    // Buscar usuario (EMAIL)
+    // Buscar usuario por email
     $sql = "SELECT id, nombre, email, password, rol, estado 
             FROM usuarios 
             WHERE email = ? 
             LIMIT 1";
 
     $stmt = $conn->prepare($sql);
+    
     if (!$stmt) {
-        throw new Exception('Error interno');
+        throw new Exception('Error en la consulta');
     }
 
     $stmt->bind_param("s", $usuario);
     $stmt->execute();
     $result = $stmt->get_result();
 
+    // Usuario no encontrado
     if ($result->num_rows === 0) {
-        throw new Exception('Usuario o contraseña incorrectos');
+        responder(false, 'Usuario o contraseña incorrectos');
     }
 
     $user = $result->fetch_assoc();
 
     // Verificar contraseña
     if (!password_verify($password, $user['password'])) {
-        throw new Exception('Usuario o contraseña incorrectos');
+        responder(false, 'Usuario o contraseña incorrectos');
     }
 
     // Verificar estado
     if ((int)$user['estado'] !== 1) {
-        throw new Exception('Cuenta desactivada');
+        responder(false, 'Tu cuenta está desactivada. Contacta al administrador.');
     }
 
-    // Crear sesión
+    // Regenerar ID de sesión por seguridad
     session_regenerate_id(true);
+
+    // Establecer variables de sesión
     $_SESSION['usuario_id']     = $user['id'];
     $_SESSION['usuario_nombre'] = $user['nombre'];
     $_SESSION['usuario_email']  = $user['email'];
     $_SESSION['rol']            = $user['rol'];
 
-    echo json_encode([
-        'success'  => true,
-        'message'  => 'Login correcto',
-        'redirect' => 'pages/dashboard.php'
-    ], JSON_UNESCAPED_UNICODE);
+    // Actualizar última sesión
+    $conn->query("UPDATE usuarios SET fecha_ultima_sesion = NOW() WHERE id = " . $user['id']);
+
+    // Determinar redirección según rol
+    $redirect = 'pages/dashboard.php';
+    
+    if ($user['rol'] === 'cliente') {
+        $redirect = 'index.php'; // Clientes van al catálogo
+    }
+
+    // Respuesta exitosa
+    responder(true, '¡Bienvenido!', [
+        'redirect' => $redirect,
+        'nombre' => $user['nombre'],
+        'rol' => $user['rol']
+    ]);
 
 } catch (Exception $e) {
-    echo json_encode([
-        'success' => false,
-        'message' => $e->getMessage()
-    ], JSON_UNESCAPED_UNICODE);
+    // Log del error (en producción)
+    error_log('Error en login: ' . $e->getMessage());
+    
+    // Respuesta genérica al usuario
+    responder(false, 'Error en el servidor. Intenta nuevamente.');
 }
-
-exit;

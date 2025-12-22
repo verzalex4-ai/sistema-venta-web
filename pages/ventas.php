@@ -1,493 +1,478 @@
 <?php
+/**
+ * VENTAS - Versión optimizada
+ */
 require_once '../config.php';
-require_once '../includes/functions.php';
 
-// Verificar permisos (admin y vendedor pueden acceder)
 requiere_permiso('ventas');
 
-// Procesar nueva venta
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
-    if ($_POST['accion'] === 'crear_venta') {
-        $cliente_id = intval($_POST['cliente_id']);
-        $metodo_pago = limpiar_entrada($_POST['metodo_pago']);
-        $productos_json = $_POST['productos'];
-        $total = floatval($_POST['total']);
-
-        // VALIDACIÓN: Verificar que productos_json no esté vacío
-        if (empty($productos_json)) {
-            $mensaje = "Error: No hay productos en el carrito";
-            $tipo_mensaje = "danger";
+// ============================================
+// PROCESAR NUEVA VENTA
+// ============================================
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion']) && $_POST['accion'] === 'crear_venta') {
+    
+    $cliente_id = intval($_POST['cliente_id']);
+    $metodo_pago = limpiar_entrada($_POST['metodo_pago']);
+    $productos_json = $_POST['productos'] ?? '';
+    $total = floatval($_POST['total']);
+    
+    // Validar datos
+    if (empty($productos_json)) {
+        set_mensaje('Error: No hay productos en el carrito', 'danger');
+    } else {
+        $productos = json_decode($productos_json, true);
+        
+        if (!is_array($productos) || count($productos) === 0) {
+            set_mensaje('Error: No se pudieron procesar los productos', 'danger');
         } else {
-            $productos = json_decode($productos_json, true);
-
-            // VALIDACIÓN: Verificar que se decodificó correctamente
-            if ($productos === null || !is_array($productos) || count($productos) === 0) {
-                $mensaje = "Error: No se pudieron procesar los productos del carrito";
-                $tipo_mensaje = "danger";
-            } else {
-                // Iniciar transacción
-                $conn->begin_transaction();
-
-                try {
-                    // Insertar venta
-                    $sql_venta = "INSERT INTO ventas (cliente_id, usuario_id, total, metodo_pago) VALUES (?, 1, ?, ?)";
-                    $stmt_venta = $conn->prepare($sql_venta);
-                    $stmt_venta->bind_param("ids", $cliente_id, $total, $metodo_pago);
-                    $stmt_venta->execute();
-                    $venta_id = $conn->insert_id;
-
-                    // Insertar detalles y actualizar stock
-                    foreach ($productos as $prod) {
-                        $producto_id = intval($prod['id']);
-                        $cantidad = intval($prod['cantidad']);
-                        $precio = floatval($prod['precio']);
-                        $subtotal = $cantidad * $precio;
-
-                        // Insertar detalle
-                        $sql_detalle = "INSERT INTO detalle_ventas (venta_id, producto_id, cantidad, precio_unitario, subtotal) VALUES (?, ?, ?, ?, ?)";
-                        $stmt_detalle = $conn->prepare($sql_detalle);
-                        $stmt_detalle->bind_param("iiidd", $venta_id, $producto_id, $cantidad, $precio, $subtotal);
-                        $stmt_detalle->execute();
-
-                        // Actualizar stock
-                        $sql_stock = "UPDATE productos SET stock = stock - ? WHERE id = ?";
-                        $stmt_stock = $conn->prepare($sql_stock);
-                        $stmt_stock->bind_param("ii", $cantidad, $producto_id);
-                        $stmt_stock->execute();
+            // Iniciar transacción
+            $conn->begin_transaction();
+            
+            try {
+                // Insertar venta
+                $sql = "INSERT INTO ventas (cliente_id, usuario_id, total, metodo_pago, estado) 
+                        VALUES (?, ?, ?, ?, 'completada')";
+                $stmt = $conn->prepare($sql);
+                $usuario_id = $_SESSION['usuario_id'];
+                $stmt->bind_param("iids", $cliente_id, $usuario_id, $total, $metodo_pago);
+                $stmt->execute();
+                $venta_id = $conn->insert_id();
+                
+                // Insertar detalles y actualizar stock
+                foreach ($productos as $prod) {
+                    $producto_id = intval($prod['id']);
+                    $cantidad = intval($prod['cantidad']);
+                    $precio = floatval($prod['precio']);
+                    $subtotal = $cantidad * $precio;
+                    
+                    // Verificar stock disponible
+                    $check = $conn->query("SELECT stock FROM productos WHERE id = $producto_id");
+                    $stock_actual = $check->fetch_assoc()['stock'];
+                    
+                    if ($stock_actual < $cantidad) {
+                        throw new Exception("Stock insuficiente para producto ID: $producto_id");
                     }
-
-                    $conn->commit();
-                    $mensaje = "✅ Venta #" . $venta_id . " registrada exitosamente";
-                    $tipo_mensaje = "success";
-                } catch (Exception $e) {
-                    $conn->rollback();
-                    $mensaje = "Error al registrar venta: " . $e->getMessage();
-                    $tipo_mensaje = "danger";
+                    
+                    // Insertar detalle
+                    $sql = "INSERT INTO detalle_ventas (venta_id, producto_id, cantidad, precio_unitario, subtotal) 
+                            VALUES (?, ?, ?, ?, ?)";
+                    $stmt = $conn->prepare($sql);
+                    $stmt->bind_param("iiidd", $venta_id, $producto_id, $cantidad, $precio, $subtotal);
+                    $stmt->execute();
+                    
+                    // Actualizar stock
+                    $conn->query("UPDATE productos SET stock = stock - $cantidad WHERE id = $producto_id");
                 }
+                
+                $conn->commit();
+                set_mensaje("✅ Venta #$venta_id registrada exitosamente", 'success');
+                
+                // Redirigir para limpiar POST
+                header('Location: ventas.php');
+                exit;
+                
+            } catch (Exception $e) {
+                $conn->rollback();
+                set_mensaje('Error al registrar venta: ' . $e->getMessage(), 'danger');
             }
         }
     }
 }
 
-// Filtros
+// ============================================
+// OBTENER VENTAS CON FILTROS
+// ============================================
 $filtro_cliente = isset($_GET['cliente']) ? intval($_GET['cliente']) : 0;
 $filtro_metodo = isset($_GET['metodo']) ? limpiar_entrada($_GET['metodo']) : '';
-$filtro_fecha_desde = isset($_GET['fecha_desde']) ? $_GET['fecha_desde'] : '';
-$filtro_fecha_hasta = isset($_GET['fecha_hasta']) ? $_GET['fecha_hasta'] : '';
-$busqueda = isset($_GET['buscar']) ? limpiar_entrada($_GET['buscar']) : '';
+$filtro_fecha_desde = $_GET['fecha_desde'] ?? '';
+$filtro_fecha_hasta = $_GET['fecha_hasta'] ?? '';
+$busqueda = $_GET['buscar'] ?? '';
 
-// Construir query con filtros
-$sql_ventas = "SELECT v.*, c.nombre as cliente_nombre, c.apellido as cliente_apellido 
-               FROM ventas v 
-               INNER JOIN clientes c ON v.cliente_id = c.id 
-               WHERE 1=1";
+$where_conditions = ["1=1"];
+$params = [];
+$types = '';
 
 if ($filtro_cliente > 0) {
-    $sql_ventas .= " AND v.cliente_id = " . $filtro_cliente;
+    $where_conditions[] = "v.cliente_id = ?";
+    $params[] = $filtro_cliente;
+    $types .= 'i';
 }
 
 if ($filtro_metodo) {
-    $sql_ventas .= " AND v.metodo_pago = '" . $filtro_metodo . "'";
+    $where_conditions[] = "v.metodo_pago = ?";
+    $params[] = $filtro_metodo;
+    $types .= 's';
 }
 
 if ($filtro_fecha_desde) {
-    $sql_ventas .= " AND DATE(v.fecha_creacion) >= '" . $filtro_fecha_desde . "'";
+    $where_conditions[] = "DATE(v.fecha_creacion) >= ?";
+    $params[] = $filtro_fecha_desde;
+    $types .= 's';
 }
 
 if ($filtro_fecha_hasta) {
-    $sql_ventas .= " AND DATE(v.fecha_creacion) <= '" . $filtro_fecha_hasta . "'";
+    $where_conditions[] = "DATE(v.fecha_creacion) <= ?";
+    $params[] = $filtro_fecha_hasta;
+    $types .= 's';
 }
 
 if ($busqueda) {
-    $sql_ventas .= " AND (c.nombre LIKE '%" . $busqueda . "%' OR c.apellido LIKE '%" . $busqueda . "%' OR v.id LIKE '%" . $busqueda . "%')";
+    $where_conditions[] = "(c.nombre LIKE ? OR c.apellido LIKE ? OR v.id LIKE ?)";
+    $search_param = "%$busqueda%";
+    $params[] = $search_param;
+    $params[] = $search_param;
+    $params[] = $search_param;
+    $types .= 'sss';
 }
 
-$sql_ventas .= " ORDER BY v.id DESC LIMIT 100";
-$result_ventas = $conn->query($sql_ventas);
+$sql = "SELECT v.*, CONCAT(c.nombre, ' ', c.apellido) as cliente_nombre
+        FROM ventas v 
+        INNER JOIN clientes c ON v.cliente_id = c.id 
+        WHERE " . implode(' AND ', $where_conditions) . "
+        ORDER BY v.id DESC LIMIT 100";
 
-// Calcular totales con filtros
-$sql_totales = "SELECT COUNT(*) as cantidad, SUM(v.total) as total_ingresos
+$stmt = $conn->prepare($sql);
+if (!empty($params)) {
+    $stmt->bind_param($types, ...$params);
+}
+$stmt->execute();
+$ventas = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+
+// Calcular totales
+$sql_totales = "SELECT COUNT(*) as cantidad, COALESCE(SUM(v.total), 0) as total_ingresos
                 FROM ventas v 
                 INNER JOIN clientes c ON v.cliente_id = c.id 
-                WHERE v.estado='completada'";
+                WHERE v.estado='completada' AND " . implode(' AND ', $where_conditions);
+$stmt = $conn->prepare($sql_totales);
+if (!empty($params)) {
+    $stmt->bind_param($types, ...$params);
+}
+$stmt->execute();
+$totales = $stmt->get_result()->fetch_assoc();
 
-if ($filtro_cliente > 0) $sql_totales .= " AND v.cliente_id = " . $filtro_cliente;
-if ($filtro_metodo) $sql_totales .= " AND v.metodo_pago = '" . $filtro_metodo . "'";
-if ($filtro_fecha_desde) $sql_totales .= " AND DATE(v.fecha_creacion) >= '" . $filtro_fecha_desde . "'";
-if ($filtro_fecha_hasta) $sql_totales .= " AND DATE(v.fecha_creacion) <= '" . $filtro_fecha_hasta . "'";
-if ($busqueda) $sql_totales .= " AND (c.nombre LIKE '%" . $busqueda . "%' OR c.apellido LIKE '%" . $busqueda . "%' OR v.id LIKE '%" . $busqueda . "%')";
-
-$totales = $conn->query($sql_totales)->fetch_assoc();
-
-// Obtener clientes activos
-$sql_clientes = "SELECT * FROM clientes WHERE estado=1 ORDER BY nombre";
-$result_clientes = $conn->query($sql_clientes);
-
-// Obtener productos activos
-$sql_productos = "SELECT * FROM productos WHERE estado=1 AND stock > 0 ORDER BY nombre";
-$result_productos = $conn->query($sql_productos);
-
-// Obtener clientes para filtro
-$sql_clientes_filtro = "SELECT * FROM clientes WHERE estado=1 ORDER BY nombre";
-$result_clientes_filtro = $conn->query($sql_clientes_filtro);
-?>
+// Obtener clientes y productos
+$clientes = $conn->query("SELECT * FROM clientes WHERE estado=1 ORDER BY nombre")->fetch_all(MYSQLI_ASSOC);
+$productos = $conn->query("SELECT * FROM productos WHERE estado=1 AND stock > 0 ORDER BY nombre")->fetch_all(MYSQLI_ASSOC);
 
 $page_title = 'Ventas - Sistema de Ventas';
 include '../includes/header.php';
 include '../includes/sidebar.php';
 ?>
 
-<div id="content-wrapper" class="flex-fill">
-<?php include "../includes/topbar.php"; ?>
-<div class="container-fluid px-4 py-4">
-<?php if (isset($mensaje)): ?>
-                    <div class="alert alert-<?php echo $tipo_mensaje; ?> alert-dismissible fade show">
-                        <?php echo $mensaje; ?>
-                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                    </div>
-                <?php endif; ?>
-
-                <div class="d-sm-flex align-items-center justify-content-between mb-4">
-                    <h1 class="h3 mb-0 text-gray-800">Gestión de Ventas</h1>
-                    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#modalVenta">
-                        <i class="fas fa-plus"></i> Nueva Venta
-                    </button>
-                </div>
-
-                <!-- Estadísticas rápidas -->
-                <div class="row mb-4">
-                    <div class="col-md-6">
-                        <div class="stat-box">
-                            <div class="d-flex justify-content-between align-items-center">
-                                <div>
-                                    <small class="text-muted">Ventas Filtradas</small>
-                                    <h4 class="mb-0"><?php echo $totales['cantidad'] ?? 0; ?></h4>
-                                </div>
-                                <i class="fas fa-shopping-cart fa-2x text-primary"></i>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-6">
-                        <div class="stat-box" style="border-left-color: var(--success)">
-                            <div class="d-flex justify-content-between align-items-center">
-                                <div>
-                                    <small class="text-muted">Ingresos Totales</small>
-                                    <h4 class="mb-0 text-success"><?php echo formatear_precio($totales['total_ingresos'] ?? 0); ?></h4>
-                                </div>
-                                <i class="fas fa-dollar-sign fa-2x text-success"></i>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Filtros -->
-                <div class="filtros-card">
-                    <form method="GET" class="row g-3">
-                        <div class="col-md-3">
-                            <label class="form-label"><i class="fas fa-search"></i> Buscar</label>
-                            <input type="text" class="form-control" name="buscar" value="<?php echo $busqueda; ?>" placeholder="ID, Cliente...">
-                        </div>
-                        <div class="col-md-3">
-                            <label class="form-label"><i class="fas fa-user"></i> Cliente</label>
-                            <select class="form-select" name="cliente">
-                                <option value="">Todos</option>
-                                <?php while ($cli = $result_clientes_filtro->fetch_assoc()): ?>
-                                    <option value="<?php echo $cli['id']; ?>" <?php echo $filtro_cliente == $cli['id'] ? 'selected' : ''; ?>>
-                                        <?php echo $cli['nombre'] . ' ' . $cli['apellido']; ?>
-                                    </option>
-                                <?php endwhile; ?>
-                            </select>
-                        </div>
-                        <div class="col-md-2">
-                            <label class="form-label"><i class="fas fa-credit-card"></i> Método</label>
-                            <select class="form-select" name="metodo">
-                                <option value="">Todos</option>
-                                <option value="efectivo" <?php echo $filtro_metodo == 'efectivo' ? 'selected' : ''; ?>>Efectivo</option>
-                                <option value="tarjeta" <?php echo $filtro_metodo == 'tarjeta' ? 'selected' : ''; ?>>Tarjeta</option>
-                                <option value="transferencia" <?php echo $filtro_metodo == 'transferencia' ? 'selected' : ''; ?>>Transferencia</option>
-                            </select>
-                        </div>
-                        <div class="col-md-2">
-                            <label class="form-label"><i class="fas fa-calendar"></i> Desde</label>
-                            <input type="date" class="form-control" name="fecha_desde" value="<?php echo $filtro_fecha_desde; ?>">
-                        </div>
-                        <div class="col-md-2">
-                            <label class="form-label"><i class="fas fa-calendar"></i> Hasta</label>
-                            <input type="date" class="form-control" name="fecha_hasta" value="<?php echo $filtro_fecha_hasta; ?>">
-                        </div>
-                        <div class="col-12">
-                            <button type="submit" class="btn btn-primary">
-                                <i class="fas fa-filter"></i> Filtrar
-                            </button>
-                            <a href="ventas.php" class="btn btn-secondary">
-                                <i class="fas fa-times"></i> Limpiar
-                            </a>
-                            <button type="button" class="btn btn-success" onclick="window.location.href='exportar_excel.php?tipo=ventas'">
-                                <i class="fas fa-file-excel"></i> Exportar
-                            </button>
-                        </div>
-                    </form>
-                </div>
-
-                <div class="card">
-                    <div class="card-header py-3">
-                        <h6 class="m-0 font-weight-bold" style="color: var(--primary);">Historial de Ventas</h6>
-                    </div>
+<div id="content-wrapper" class="d-flex flex-column">
+    <?php include '../includes/topbar.php'; ?>
+    
+    <div class="container-fluid px-4 py-4">
+        
+        <?php mostrar_mensaje(); ?>
+        
+        <!-- Encabezado -->
+        <div class="d-sm-flex align-items-center justify-content-between mb-4">
+            <h1 class="h3 mb-0 text-gray-800">
+                <i class="fas fa-cash-register me-2"></i>Gestión de Ventas
+            </h1>
+            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#modalVenta">
+                <i class="fas fa-plus me-2"></i>Nueva Venta
+            </button>
+        </div>
+        
+        <!-- Estadísticas -->
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <div class="card border-left-primary shadow h-100 py-2">
                     <div class="card-body">
-                        <div class="table-responsive">
-                            <table class="table table-hover">
-                                <thead>
-                                    <tr>
-                                        <th>ID</th>
-                                        <th>Cliente</th>
-                                        <th>Total</th>
-                                        <th>Método de Pago</th>
-                                        <th>Estado</th>
-                                        <th>Fecha</th>
-                                        <th>Acciones</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <?php
-                                    if ($result_ventas->num_rows > 0):
-                                        while ($row = $result_ventas->fetch_assoc()):
-                                    ?>
-                                            <tr>
-                                                <td><strong>#<?php echo str_pad($row['id'], 6, '0', STR_PAD_LEFT); ?></strong></td>
-                                                <td>
-                                                    <i class="fas fa-user-circle text-primary"></i>
-                                                    <?php echo $row['cliente_nombre'] . ' ' . $row['cliente_apellido']; ?>
-                                                </td>
-                                                <td class="text-success fw-bold"><?php echo formatear_precio($row['total']); ?></td>
-                                                <td>
-                                                    <?php
-                                                    $iconos = [
-                                                        'efectivo' => 'fa-money-bill-wave',
-                                                        'tarjeta' => 'fa-credit-card',
-                                                        'transferencia' => 'fa-exchange-alt'
-                                                    ];
-                                                    ?>
-                                                    <span class="badge bg-info">
-                                                        <i class="fas <?php echo $iconos[$row['metodo_pago']] ?? 'fa-wallet'; ?>"></i>
-                                                        <?php echo ucfirst($row['metodo_pago']); ?>
-                                                    </span>
-                                                </td>
-                                                <td>
-                                                    <span class="badge bg-success">
-                                                        <?php echo ucfirst($row['estado']); ?>
-                                                    </span>
-                                                </td>
-                                                <td><?php echo formatear_fecha($row['fecha_creacion']); ?></td>
-                                                <td>
-                                                    <button class="btn btn-info btn-sm" onclick="verDetalle(<?php echo $row['id']; ?>)" title="Ver Detalle">
-                                                        <i class="fas fa-eye"></i>
-                                                    </button>
-                                                    <button class="btn btn-primary btn-sm" onclick="imprimirTicket(<?php echo $row['id']; ?>)" title="Imprimir">
-                                                        <i class="fas fa-print"></i>
-                                                    </button>
-                                                </td>
-                                            </tr>
-                                        <?php
-                                        endwhile;
-                                    else:
-                                        ?>
-                                        <tr>
-                                            <td colspan="7" class="text-center text-muted py-4">
-                                                <i class="fas fa-inbox fa-3x mb-3"></i><br>
-                                                No se encontraron ventas con los filtros aplicados
-                                            </td>
-                                        </tr>
-                                    <?php endif; ?>
-                                </tbody>
-                            </table>
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
+                                    Ventas Filtradas
+                                </div>
+                                <div class="h5 mb-0 font-weight-bold text-gray-800">
+                                    <?php echo $totales['cantidad']; ?>
+                                </div>
+                            </div>
+                            <i class="fas fa-shopping-cart fa-2x text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card border-left-success shadow h-100 py-2">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <div class="text-xs font-weight-bold text-success text-uppercase mb-1">
+                                    Ingresos Totales
+                                </div>
+                                <div class="h5 mb-0 font-weight-bold text-gray-800">
+                                    <?php echo formatear_precio($totales['total_ingresos']); ?>
+                                </div>
+                            </div>
+                            <i class="fas fa-dollar-sign fa-2x text-gray-300"></i>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
-    </div>
-
-    <!-- Modal Nueva Venta -->
-    <div class="modal fade" id="modalVenta" tabindex="-1">
-        <div class="modal-dialog modal-xl">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">Nueva Venta</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        
+        <!-- Filtros -->
+        <div class="card mb-4">
+            <div class="card-body">
+                <form method="GET" class="row g-3">
+                    <div class="col-md-3">
+                        <label class="form-label">Buscar</label>
+                        <input type="text" class="form-control" name="buscar" 
+                               value="<?php echo htmlspecialchars($busqueda); ?>" 
+                               placeholder="ID, Cliente...">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Cliente</label>
+                        <select class="form-select" name="cliente">
+                            <option value="">Todos</option>
+                            <?php foreach ($clientes as $cli): ?>
+                                <option value="<?php echo $cli['id']; ?>" 
+                                        <?php echo $filtro_cliente == $cli['id'] ? 'selected' : ''; ?>>
+                                    <?php echo htmlspecialchars($cli['nombre'] . ' ' . $cli['apellido']); ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">Método de Pago</label>
+                        <select class="form-select" name="metodo">
+                            <option value="">Todos</option>
+                            <option value="efectivo" <?php echo $filtro_metodo == 'efectivo' ? 'selected' : ''; ?>>Efectivo</option>
+                            <option value="tarjeta" <?php echo $filtro_metodo == 'tarjeta' ? 'selected' : ''; ?>>Tarjeta</option>
+                            <option value="transferencia" <?php echo $filtro_metodo == 'transferencia' ? 'selected' : ''; ?>>Transferencia</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">Desde</label>
+                        <input type="date" class="form-control" name="fecha_desde" 
+                               value="<?php echo htmlspecialchars($filtro_fecha_desde); ?>">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">Hasta</label>
+                        <input type="date" class="form-control" name="fecha_hasta" 
+                               value="<?php echo htmlspecialchars($filtro_fecha_hasta); ?>">
+                    </div>
+                    <div class="col-12">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-filter me-2"></i>Filtrar
+                        </button>
+                        <a href="ventas.php" class="btn btn-secondary">
+                            <i class="fas fa-times me-2"></i>Limpiar
+                        </a>
+                    </div>
+                </form>
+            </div>
+        </div>
+        
+        <!-- Tabla de Ventas -->
+        <div class="card">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">Historial de Ventas</h6>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Cliente</th>
+                                <th>Total</th>
+                                <th>Método</th>
+                                <th>Estado</th>
+                                <th>Fecha</th>
+                                <th>Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php if (count($ventas) > 0): ?>
+                                <?php foreach ($ventas as $venta): ?>
+                                <tr>
+                                    <td><strong>#<?php echo str_pad($venta['id'], 6, '0', STR_PAD_LEFT); ?></strong></td>
+                                    <td><?php echo htmlspecialchars($venta['cliente_nombre']); ?></td>
+                                    <td class="text-success fw-bold"><?php echo formatear_precio($venta['total']); ?></td>
+                                    <td>
+                                        <span class="badge bg-info">
+                                            <?php echo ucfirst($venta['metodo_pago']); ?>
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <span class="badge bg-success">
+                                            <?php echo ucfirst($venta['estado']); ?>
+                                        </span>
+                                    </td>
+                                    <td><?php echo formatear_fecha($venta['fecha_creacion']); ?></td>
+                                    <td>
+                                        <a href="detalle_venta.php?id=<?php echo $venta['id']; ?>" 
+                                           class="btn btn-info btn-sm" title="Ver Detalle">
+                                            <i class="fas fa-eye"></i>
+                                        </a>
+                                    </td>
+                                </tr>
+                                <?php endforeach; ?>
+                            <?php else: ?>
+                                <tr>
+                                    <td colspan="7" class="text-center text-muted py-4">
+                                        <i class="fas fa-inbox fa-3x mb-3"></i><br>
+                                        No se encontraron ventas
+                                    </td>
+                                </tr>
+                            <?php endif; ?>
+                        </tbody>
+                    </table>
                 </div>
-                <form method="POST" id="formVenta">
-                    <div class="modal-body">
-                        <input type="hidden" name="accion" value="crear_venta">
-                        <input type="hidden" name="productos" id="productos_json">
-                        <input type="hidden" name="total" id="total_venta">
+            </div>
+        </div>
+        
+    </div>
+</div>
 
-                        <div class="row">
-                            <div class="col-md-8">
-                                <h6 class="mb-3"><i class="fas fa-box"></i> Seleccionar Productos</h6>
-                                <div class="mb-3">
-                                    <select class="form-select" id="producto_select">
-                                        <option value="">Seleccionar producto...</option>
-                                        <?php
-                                        while ($prod = $result_productos->fetch_assoc()):
-                                            // Crear array limpio solo con datos necesarios
-                                            $producto_datos = [
-                                                'id' => $prod['id'],
-                                                'nombre' => $prod['nombre'],
-                                                'precio' => $prod['precio'],
-                                                'stock' => $prod['stock']
-                                            ];
-                                        ?>
-                                            <option value='<?php echo htmlspecialchars(json_encode($producto_datos), ENT_QUOTES, 'UTF-8'); ?>'>
-                                                <?php echo $prod['nombre'] . ' - ' . formatear_precio($prod['precio']) . ' (Stock: ' . $prod['stock'] . ')'; ?>
-                                            </option>
-                                        <?php endwhile; ?>
-                                    </select>
-                                </div>
-
-
-                                <div id="carrito-productos">
-                                    <div class="empty-cart">
-                                        <i class="fas fa-shopping-cart"></i>
-                                        <p>No hay productos agregados al carrito</p>
-                                        <small class="text-muted">Selecciona productos del menú desplegable</small>
-                                    </div>
+<!-- Modal Nueva Venta -->
+<div class="modal fade" id="modalVenta" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Nueva Venta</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" id="formVenta">
+                <div class="modal-body">
+                    <input type="hidden" name="accion" value="crear_venta">
+                    <input type="hidden" name="productos" id="productos_json">
+                    <input type="hidden" name="total" id="total_venta">
+                    
+                    <div class="row">
+                        <div class="col-md-8">
+                            <h6 class="mb-3">Seleccionar Productos</h6>
+                            <select class="form-select mb-3" id="producto_select">
+                                <option value="">Seleccionar producto...</option>
+                                <?php foreach ($productos as $prod): ?>
+                                    <option value='<?php echo htmlspecialchars(json_encode([
+                                        'id' => $prod['id'],
+                                        'nombre' => $prod['nombre'],
+                                        'precio' => $prod['precio'],
+                                        'stock' => $prod['stock']
+                                    ]), ENT_QUOTES); ?>'>
+                                        <?php echo htmlspecialchars($prod['nombre']); ?> - 
+                                        <?php echo formatear_precio($prod['precio']); ?> 
+                                        (Stock: <?php echo $prod['stock']; ?>)
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                            
+                            <div id="carrito-productos">
+                                <div class="text-center text-muted py-4">
+                                    <i class="fas fa-shopping-cart fa-3x mb-3"></i>
+                                    <p>No hay productos en el carrito</p>
                                 </div>
                             </div>
-
-                            <div class="col-md-4">
-                                <h6 class="mb-3"><i class="fas fa-info-circle"></i> Información de Venta</h6>
-
-                                <div class="mb-3">
-                                    <label class="form-label">Cliente *</label>
-                                    <select class="form-select" name="cliente_id" required>
-                                        <option value="">Seleccionar...</option>
-                                        <?php
-                                        $result_clientes->data_seek(0);
-                                        while ($cli = $result_clientes->fetch_assoc()):
-                                        ?>
-                                            <option value="<?php echo $cli['id']; ?>">
-                                                <?php echo $cli['nombre'] . ' ' . $cli['apellido']; ?>
-                                            </option>
-                                        <?php endwhile; ?>
-                                    </select>
-                                </div>
-
-                                <div class="mb-3">
-                                    <label class="form-label">Método de Pago *</label>
-                                    <select class="form-select" name="metodo_pago" required>
-                                        <option value="efectivo">💵 Efectivo</option>
-                                        <option value="tarjeta">💳 Tarjeta</option>
-                                        <option value="transferencia">🔄 Transferencia</option>
-                                    </select>
-                                </div>
-
-                                <hr>
-
-                                <div class="card bg-light">
-                                    <div class="card-body text-center">
-                                        <h6 class="text-muted mb-2">TOTAL A PAGAR</h6>
-                                        <div class="total-venta" id="total_display">$0.00</div>
-                                        <small class="text-muted" id="items_count">0 productos</small>
-                                    </div>
+                        </div>
+                        
+                        <div class="col-md-4">
+                            <h6 class="mb-3">Información de Venta</h6>
+                            
+                            <div class="mb-3">
+                                <label class="form-label">Cliente *</label>
+                                <select class="form-select" name="cliente_id" required>
+                                    <option value="">Seleccionar...</option>
+                                    <?php foreach ($clientes as $cli): ?>
+                                        <option value="<?php echo $cli['id']; ?>">
+                                            <?php echo htmlspecialchars($cli['nombre'] . ' ' . $cli['apellido']); ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label class="form-label">Método de Pago *</label>
+                                <select class="form-select" name="metodo_pago" required>
+                                    <option value="efectivo">💵 Efectivo</option>
+                                    <option value="tarjeta">💳 Tarjeta</option>
+                                    <option value="transferencia">🔄 Transferencia</option>
+                                </select>
+                            </div>
+                            
+                            <hr>
+                            
+                            <div class="card bg-light">
+                                <div class="card-body text-center">
+                                    <h6 class="text-muted mb-2">TOTAL A PAGAR</h6>
+                                    <h2 class="mb-0 text-success" id="total_display">$0.00</h2>
+                                    <small class="text-muted" id="items_count">0 productos</small>
                                 </div>
                             </div>
                         </div>
                     </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
-                            <i class="fas fa-times"></i> Cancelar
-                        </button>
-                        <button type="submit" class="btn btn-success" id="btnGuardarVenta" disabled>
-                            <i class="fas fa-check"></i> Procesar Venta
-                        </button>
-                    </div>
-                </form>
-</div></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-success" id="btnGuardarVenta" disabled>
+                        <i class="fas fa-check me-2"></i>Procesar Venta
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
 
 <?php
-$inline_script = <<<'JS'
-// Variables GLOBALES
-        var carrito = [];
+$inline_script = <<<'JAVASCRIPT'
+let carrito = [];
 
-        // Función para formatear precio (CORREGIDA)
-        function formatearPrecio(precio) {
-            return '$' + parseFloat(precio).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+function formatearPrecio(precio) {
+    return '$' + parseFloat(precio).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+}
+
+function agregarAlCarrito(producto) {
+    const existe = carrito.find(p => p.id === parseInt(producto.id));
+    
+    if (existe) {
+        if (existe.cantidad < producto.stock) {
+            existe.cantidad++;
+        } else {
+            alert('Stock insuficiente');
+            return;
         }
+    } else {
+        carrito.push({
+            id: parseInt(producto.id),
+            nombre: producto.nombre,
+            precio: parseFloat(producto.precio),
+            cantidad: 1,
+            stock: parseInt(producto.stock)
+        });
+    }
+    
+    actualizarCarrito();
+}
 
-        // Función para agregar al carrito (GLOBAL)
-        function agregarAlCarrito(producto) {
-            console.log('Agregando al carrito:', producto);
-
-            // Convertir id a número
-            const productoId = parseInt(producto.id);
-            const existe = carrito.find(p => p.id === productoId);
-
-            if (existe) {
-                console.log('Producto ya existe, aumentando cantidad');
-                if (existe.cantidad < parseInt(producto.stock)) {
-                    existe.cantidad++;
-                } else {
-                    alert('⚠️ Stock insuficiente. Disponible: ' + producto.stock);
-                    return;
-                }
-            } else {
-                console.log('Producto nuevo, agregando al carrito');
-                const nuevoProducto = {
-                    id: productoId,
-                    nombre: producto.nombre,
-                    precio: parseFloat(producto.precio),
-                    cantidad: 1,
-                    stock: parseInt(producto.stock)
-                };
-                carrito.push(nuevoProducto);
-                console.log('Producto agregado:', nuevoProducto);
-            }
-
-            console.log('Carrito actual:', carrito);
-            actualizarCarrito();
-        }
-
-        // Función para actualizar el carrito (GLOBAL)
-        function actualizarCarrito() {
-            console.log('=== ACTUALIZANDO CARRITO ===');
-            console.log('Cantidad de productos en carrito:', carrito.length);
-            console.log('Contenido del carrito:', carrito);
-
-            const container = document.getElementById('carrito-productos');
-
-            if (!container) {
-                console.error('ERROR: No se encontró el contenedor del carrito');
-                return;
-            }
-
-            if (carrito.length === 0) {
-                console.log('Carrito vacío, mostrando mensaje');
-                container.innerHTML = `
-            <div class="empty-cart">
-                <i class="fas fa-shopping-cart"></i>
-                <p>No hay productos agregados al carrito</p>
-                <small class="text-muted">Selecciona productos del menú desplegable</small>
+function actualizarCarrito() {
+    const container = document.getElementById('carrito-productos');
+    
+    if (carrito.length === 0) {
+        container.innerHTML = `
+            <div class="text-center text-muted py-4">
+                <i class="fas fa-shopping-cart fa-3x mb-3"></i>
+                <p>No hay productos en el carrito</p>
             </div>
         `;
-                document.getElementById('total_display').innerText = '$0.00';
-                document.getElementById('items_count').innerText = '0 productos';
-                document.getElementById('btnGuardarVenta').disabled = true;
-                document.getElementById('productos_json').value = '';
-                document.getElementById('total_venta').value = '0';
-                return;
-            }
-
-            console.log('Generando HTML del carrito...');
-            let html = '';
-            let total = 0;
-
-            carrito.forEach((prod, index) => {
-                console.log(`Procesando producto ${index}:`, prod);
-                const subtotal = prod.precio * prod.cantidad;
-                total += subtotal;
-
-                html += `
-            <div class="producto-item">
+        document.getElementById('total_display').textContent = '$0.00';
+        document.getElementById('items_count').textContent = '0 productos';
+        document.getElementById('btnGuardarVenta').disabled = true;
+        return;
+    }
+    
+    let html = '<div class="list-group">';
+    let total = 0;
+    
+    carrito.forEach((prod, index) => {
+        const subtotal = prod.precio * prod.cantidad;
+        total += subtotal;
+        
+        html += `
+            <div class="list-group-item">
                 <div class="d-flex justify-content-between align-items-center">
                     <div class="flex-grow-1">
                         <strong>${prod.nombre}</strong><br>
@@ -497,187 +482,99 @@ $inline_script = <<<'JS'
                         </small>
                     </div>
                     <div class="btn-group">
-                        <button type="button" class="btn btn-sm btn-outline-danger" onclick="cambiarCantidad(${index}, -1)" title="Disminuir">
+                        <button type="button" class="btn btn-sm btn-outline-danger" onclick="cambiarCantidad(${index}, -1)">
                             <i class="fas fa-minus"></i>
                         </button>
-                        <button type="button" class="btn btn-sm btn-outline-secondary" disabled style="min-width: 50px;">
-                            <strong>${prod.cantidad}</strong>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" disabled>
+                            ${prod.cantidad}
                         </button>
-                        <button type="button" class="btn btn-sm btn-outline-success" onclick="cambiarCantidad(${index}, 1)" title="Aumentar" ${prod.cantidad >= prod.stock ? 'disabled' : ''}>
+                        <button type="button" class="btn btn-sm btn-outline-success" 
+                                onclick="cambiarCantidad(${index}, 1)" 
+                                ${prod.cantidad >= prod.stock ? 'disabled' : ''}>
                             <i class="fas fa-plus"></i>
                         </button>
-                        <button type="button" class="btn btn-sm btn-danger" onclick="eliminarDelCarrito(${index})" title="Eliminar">
+                        <button type="button" class="btn btn-sm btn-danger" onclick="eliminarDelCarrito(${index})">
                             <i class="fas fa-trash"></i>
                         </button>
                     </div>
                 </div>
             </div>
         `;
-            });
+    });
+    html += '</div>';
+    
+    container.innerHTML = html;
+    document.getElementById('total_display').textContent = formatearPrecio(total);
+    document.getElementById('items_count').textContent = carrito.length + ' producto' + (carrito.length !== 1 ? 's' : '');
+    document.getElementById('total_venta').value = total.toFixed(2);
+    document.getElementById('productos_json').value = JSON.stringify(carrito);
+    document.getElementById('btnGuardarVenta').disabled = false;
+}
 
-            console.log('Insertando HTML en el contenedor');
-            container.innerHTML = html;
+function cambiarCantidad(index, cambio) {
+    const producto = carrito[index];
+    const nuevaCantidad = producto.cantidad + cambio;
+    
+    if (nuevaCantidad <= 0) {
+        eliminarDelCarrito(index);
+        return;
+    }
+    
+    if (nuevaCantidad > producto.stock) {
+        alert('Stock insuficiente');
+        return;
+    }
+    
+    producto.cantidad = nuevaCantidad;
+    actualizarCarrito();
+}
 
-            console.log('Total calculado:', total);
+function eliminarDelCarrito(index) {
+    if (confirm('¿Eliminar este producto?')) {
+        carrito.splice(index, 1);
+        actualizarCarrito();
+    }
+}
 
-            // Actualizar total con animación
-            const totalDisplay = document.getElementById('total_display');
-            const itemsCount = document.getElementById('items_count');
-            const totalVenta = document.getElementById('total_venta');
-            const productosJson = document.getElementById('productos_json');
-            const btnGuardar = document.getElementById('btnGuardarVenta');
-
-            if (totalDisplay) totalDisplay.innerText = formatearPrecio(total);
-            if (itemsCount) itemsCount.innerText = carrito.length + ' producto' + (carrito.length !== 1 ? 's' : '');
-            if (totalVenta) totalVenta.value = total.toFixed(2);
-            if (productosJson) {
-                const carritoJson = JSON.stringify(carrito);
-                productosJson.value = carritoJson;
-                console.log('JSON guardado:', carritoJson);
-            }
-            if (btnGuardar) btnGuardar.disabled = false;
-
-            console.log('Carrito actualizado exitosamente');
-            console.log('=== FIN ACTUALIZACIÓN ===');
-        }
-
-        // Cambiar cantidad (GLOBAL)
-        function cambiarCantidad(index, cambio) {
-            const producto = carrito[index];
-            const nuevaCantidad = producto.cantidad + cambio;
-
-            if (nuevaCantidad <= 0) {
-                eliminarDelCarrito(index);
-                return;
-            }
-
-            if (nuevaCantidad > producto.stock) {
-                alert('⚠️ Stock insuficiente. Disponible: ' + producto.stock);
-                return;
-            }
-
-            producto.cantidad = nuevaCantidad;
-            actualizarCarrito();
-        }
-
-        // Eliminar del carrito (GLOBAL)
-        function eliminarDelCarrito(index) {
-            if (confirm('¿Eliminar este producto del carrito?')) {
-                carrito.splice(index, 1);
-                actualizarCarrito();
+// Event listeners
+document.addEventListener('DOMContentLoaded', function() {
+    const productoSelect = document.getElementById('producto_select');
+    
+    productoSelect.addEventListener('change', function() {
+        if (this.value) {
+            try {
+                const producto = JSON.parse(this.value);
+                agregarAlCarrito(producto);
+                this.value = '';
+            } catch(e) {
+                alert('Error al agregar producto');
             }
         }
-
-
-
-        // Ver detalle de venta (GLOBAL)
-        function verDetalle(id) {
-            window.location.href = 'detalle_venta.php?id=' + id;
+    });
+    
+    // Resetear modal al cerrar
+    document.getElementById('modalVenta').addEventListener('hidden.bs.modal', function() {
+        carrito = [];
+        actualizarCarrito();
+        document.getElementById('formVenta').reset();
+    });
+    
+    // Validar antes de enviar
+    document.getElementById('formVenta').addEventListener('submit', function(e) {
+        if (carrito.length === 0) {
+            e.preventDefault();
+            alert('Debe agregar al menos un producto');
+            return false;
         }
-
-        // Imprimir ticket (GLOBAL)
-        function imprimirTicket(id) {
-            window.open('detalle_venta.php?id=' + id, '_blank');
+        
+        if (!document.querySelector('[name="cliente_id"]').value) {
+            e.preventDefault();
+            alert('Debe seleccionar un cliente');
+            return false;
         }
+    });
+});
+JAVASCRIPT;
 
-
-        // INICIALIZACIÓN AL CARGAR EL DOM
-
-        document.addEventListener('DOMContentLoaded', function() {
-            console.log('DOM cargado, inicializando...');
-
-            const productoSelect = document.getElementById('producto_select');
-            if (!productoSelect) {
-                console.error('❌ No se encontró el select de productos');
-                return;
-            }
-
-            console.log('✅ Select de productos encontrado');
-            console.log('Opciones disponibles:', productoSelect.options.length);
-
-            // Event listener para seleccionar producto
-            productoSelect.addEventListener('change', function() {
-                if (this.value) {
-                    try {
-                        const producto = JSON.parse(this.value);
-                        console.log('Producto seleccionado:', producto);
-                        agregarAlCarrito(producto);
-                        this.value = '';
-                    } catch (error) {
-                        console.error('Error al parsear producto:', error);
-                        alert('Error al agregar producto');
-                    }
-                }
-            });
-
-            // ⭐ Resetear modal al cerrar
-            const modalVenta = document.getElementById('modalVenta');
-            if (modalVenta) {
-                modalVenta.addEventListener('hidden.bs.modal', function() {
-                    carrito = [];
-                    actualizarCarrito();
-                    document.getElementById('formVenta').reset();
-                    console.log('Modal cerrado, carrito reseteado');
-                });
-            }
-
-            // ⭐ Validar formulario antes de enviar
-            const formVenta = document.getElementById('formVenta');
-            if (formVenta) {
-                formVenta.addEventListener('submit', function(e) {
-                    console.log('=== INTENTANDO ENVIAR FORMULARIO ===');
-                    console.log('Carrito actual:', carrito);
-                    console.log('productos_json value:', document.getElementById('productos_json').value);
-
-                    if (carrito.length === 0) {
-                        e.preventDefault();
-                        alert('⚠️ Debe agregar al menos un producto al carrito');
-                        return false;
-                    }
-
-                    const clienteId = document.querySelector('select[name="cliente_id"]').value;
-                    if (!clienteId) {
-                        e.preventDefault();
-                        alert('⚠️ Debe seleccionar un cliente');
-                        return false;
-                    }
-
-                    const metodoPago = document.querySelector('select[name="metodo_pago"]').value;
-                    if (!metodoPago) {
-                        e.preventDefault();
-                        alert('⚠️ Debe seleccionar un método de pago');
-                        return false;
-                    }
-
-                    // Verificar que productos_json tenga contenido
-                    const productosJson = document.getElementById('productos_json').value;
-                    if (!productosJson || productosJson === '' || productosJson === '[]') {
-                        e.preventDefault();
-                        alert('⚠️ Error: El carrito está vacío');
-                        console.error('productos_json está vacío!');
-                        return false;
-                    }
-
-                    console.log('Enviando venta:', {
-                        carrito: carrito,
-                        total: document.getElementById('total_venta').value,
-                        productos_json: productosJson
-                    });
-
-                    // Mostrar loading
-                    const btn = document.getElementById('btnGuardarVenta');
-                    btn.disabled = true;
-                    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Procesando...';
-
-                    return true;
-                });
-            }
-
-            // Log inicial
-            console.log('Script de ventas cargado correctamente');
-            console.log('Carrito inicial:', carrito);
-        });
-JS;
+include '../includes/footer.php';
 ?>
-
-<?php include "../includes/footer.php"; ?>
