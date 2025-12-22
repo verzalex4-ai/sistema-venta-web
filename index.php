@@ -434,7 +434,7 @@ $result = $stmt->get_result();
                 <ul class="navbar-nav ms-auto">
                     <?php if (esta_logueado()): ?>
                         <li class="nav-item">
-                            <a class="nav-link" href="dashboard.php">
+                            <a class="nav-link" href="pages/dashboard.php">
                                 <i class="fas fa-tachometer-alt me-1"></i>Panel de Control
                             </a>
                         </li>

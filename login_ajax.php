@@ -69,7 +69,7 @@ try {
     echo json_encode([
         'success'  => true,
         'message'  => 'Login correcto',
-        'redirect' => 'index.php'
+        'redirect' => 'pages/dashboard.php'
     ], JSON_UNESCAPED_UNICODE);
 
 } catch (Exception $e) {
