@@ -18,17 +18,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
         $observaciones = limpiar_entrada($_POST['observaciones']);
 
         $sql = "INSERT INTO movimientos_caja (tipo, concepto, categoria, importe, metodo_pago, referencia, fecha_movimiento, observaciones, usuario_id) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)";
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
         $stmt = $conn->prepare($sql);
-        $stmt->bind_param("sssdssss", $tipo, $concepto, $categoria, $importe, $metodo_pago, $referencia, $fecha_movimiento, $observaciones);
+        $usuario_id = $_SESSION['usuario_id'];
+        $stmt->bind_param("sssdsssi", $tipo, $concepto, $categoria, $importe, $metodo_pago, $referencia, $fecha_movimiento, $observaciones, $usuario_id);
 
         if ($stmt->execute()) {
-            $mensaje = "Movimiento registrado exitosamente";
-            $tipo_mensaje = "success";
+            set_mensaje("Movimiento registrado exitosamente", 'success');
         } else {
-            $mensaje = "Error al registrar movimiento";
-            $tipo_mensaje = "danger";
+            set_mensaje("Error al registrar movimiento", 'danger');
         }
+        
+        header('Location: caja.php');
+        exit;
     }
 }
 
@@ -60,7 +62,6 @@ $stmt_acum = $conn->prepare($sql_acumulado);
 $stmt_acum->bind_param("s", $fecha_filtro);
 $stmt_acum->execute();
 $saldo_acumulado = $stmt_acum->get_result()->fetch_assoc()['saldo_acumulado'] ?? 0;
-?>
 
 $page_title = 'Caja - Sistema de Ventas';
 include '../includes/header.php';

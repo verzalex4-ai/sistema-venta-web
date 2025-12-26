@@ -14,7 +14,3 @@ function mostrar_alertas() {
     }
 }
 
-function set_mensaje($mensaje, $tipo = 'success') {
-    $_SESSION['mensaje'] = $mensaje;
-    $_SESSION['tipo_mensaje'] = $tipo;
-}
