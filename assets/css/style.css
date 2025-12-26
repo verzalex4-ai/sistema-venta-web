@@ -425,6 +425,10 @@ body {
    RESPONSIVE
    ============================================ */
 
+/* ============================================
+   RESPONSIVE - SIDEBAR MOBILE
+   ============================================ */
+
 @media (max-width: 768px) {
     body {
         font-size: 14px;
@@ -437,5 +441,64 @@ body {
     
     .card-body {
         padding: 1rem;
+    }
+    
+    /* FIX: Ocultar sidebar completamente en móvil */
+    #sidebar-wrapper {
+        position: fixed;
+        top: 0;
+        left: -250px; /* Oculto por defecto */
+        width: 250px;
+        height: 100vh;
+        z-index: 1000;
+        transition: left 0.3s ease;
+        overflow-y: auto;
+        background: var(--bg-dark);
+        /* IMPORTANTE: Eliminar transparencia */
+        opacity: 1 !important;
+        visibility: hidden; /* Totalmente oculto */
+    }
+    
+    /* Cuando está visible */
+    #sidebar-wrapper.show {
+        left: 0;
+        visibility: visible; /* Ahora sí visible */
+        box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+    }
+    
+    /* Overlay oscuro cuando sidebar está abierto */
+    #sidebar-wrapper.show::before {
+        content: '';
+        position: fixed;
+        top: 0;
+        left: 250px;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: -1;
+    }
+    
+    /* Asegurar que el contenido principal ocupe todo el ancho */
+    #content-wrapper {
+        width: 100%;
+        margin-left: 0 !important;
+    }
+    
+    /* Botón toggle siempre visible en móvil */
+    #sidebarToggle {
+        display: block !important;
+    }
+}
+
+/* Desktop: sidebar siempre visible */
+@media (min-width: 769px) {
+    #sidebar-wrapper {
+        position: relative;
+        left: 0 !important;
+        visibility: visible !important;
+    }
+    
+    #sidebarToggle {
+        display: none;
     }
 }

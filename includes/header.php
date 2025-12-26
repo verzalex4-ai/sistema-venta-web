@@ -29,8 +29,8 @@ $page_title = $page_title ?? 'Sistema de Ventas';
     <?php if (isset($chart_js) && $chart_js): ?>
         <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <?php endif; ?>
-    
-    <style>
+
+<style>
         body {
             background-color: var(--bg-secondary);
         }
@@ -40,11 +40,13 @@ $page_title = $page_title ?? 'Sistema de Ventas';
             min-height: 100vh;
         }
         
+        /* Desktop: sidebar fijo y visible */
         #sidebar-wrapper {
             width: 250px;
             background: var(--bg-dark);
             color: white;
             transition: all 0.3s;
+            flex-shrink: 0;
         }
         
         #content-wrapper {
@@ -58,19 +60,46 @@ $page_title = $page_title ?? 'Sistema de Ventas';
             height: 300px;
         }
         
+        /* Mobile: sidebar completamente oculto */
         @media (max-width: 768px) {
             #sidebar-wrapper {
-                width: 0;
                 position: fixed;
-                z-index: 1000;
+                top: 0;
+                left: -250px; /* Oculto fuera de pantalla */
+                width: 250px;
                 height: 100vh;
+                z-index: 1000;
+                overflow-y: auto;
+                visibility: hidden; /* Invisible e inaccesible */
+                transition: left 0.3s ease, visibility 0s 0.3s; /* Delay en visibility */
             }
             
             #sidebar-wrapper.show {
-                width: 250px;
+                left: 0;
+                visibility: visible;
+                transition: left 0.3s ease, visibility 0s; /* Sin delay al mostrar */
+                box-shadow: 2px 0 15px rgba(0, 0, 0, 0.3);
+            }
+            
+            /* Overlay oscuro cuando sidebar está abierto */
+            #sidebar-wrapper.show::after {
+                content: '';
+                position: fixed;
+                top: 0;
+                left: 250px;
+                right: 0;
+                bottom: 0;
+                background: rgba(0, 0, 0, 0.5);
+                z-index: -1;
+            }
+            
+            #content-wrapper {
+                width: 100%;
+                margin-left: 0;
             }
         }
     </style>
+
 </head>
 <body>
     <!-- Mobile Menu Toggle -->
