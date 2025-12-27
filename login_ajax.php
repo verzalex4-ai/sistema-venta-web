@@ -82,7 +82,7 @@ try {
     $conn->query("UPDATE usuarios SET fecha_ultima_sesion = NOW() WHERE id = " . $user['id']);
 
     // Determinar redirección según rol
-    $redirect = 'pages/dashboard.php';
+    $redirect = 'index.php'; // Por defecto a inicio
     
     if ($user['rol'] === 'cliente') {
         $redirect = 'index.php'; // Clientes van al catálogo

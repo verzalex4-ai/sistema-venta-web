@@ -15,6 +15,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
     try {
         if ($accion === 'crear' || $accion === 'editar') {
             $id = $accion === 'editar' ? intval($_POST['id']) : 0;
+            $codigo = limpiar_entrada($_POST['codigo']);
             $nombre = limpiar_entrada($_POST['nombre']);
             $descripcion = limpiar_entrada($_POST['descripcion']);
             $precio = floatval($_POST['precio']);
@@ -41,22 +42,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion'])) {
             }
             
             if ($accion === 'crear') {
-                $sql = "INSERT INTO productos (nombre, descripcion, imagen, precio, stock, categoria_id) 
-                        VALUES (?, ?, ?, ?, ?, ?)";
+                $sql = "INSERT INTO productos (codigo, nombre, descripcion, imagen, precio, stock, categoria_id) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?)";
                 $stmt = $conn->prepare($sql);
-                $stmt->bind_param("sssdii", $nombre, $descripcion, $imagen, $precio, $stock, $categoria_id);
+                $stmt->bind_param("ssssdii", $codigo, $nombre, $descripcion, $imagen, $precio, $stock, $categoria_id);
                 $stmt->execute();
                 
                 set_mensaje('Producto creado exitosamente', 'success');
             } else {
+
                 if ($imagen) {
-                    $sql = "UPDATE productos SET nombre=?, descripcion=?, imagen=?, precio=?, stock=?, categoria_id=? WHERE id=?";
+                    $sql = "UPDATE productos SET codigo=?, nombre=?, descripcion=?, imagen=?, precio=?, stock=?, categoria_id=? WHERE id=?";
                     $stmt = $conn->prepare($sql);
-                    $stmt->bind_param("sssdiiii", $nombre, $descripcion, $imagen, $precio, $stock, $categoria_id, $id);
+                    $stmt->bind_param("ssssdiiii", $codigo, $nombre, $descripcion, $imagen, $precio, $stock, $categoria_id, $id);
                 } else {
-                    $sql = "UPDATE productos SET nombre=?, descripcion=?, precio=?, stock=?, categoria_id=? WHERE id=?";
+                    $sql = "UPDATE productos SET codigo=? nombre=?, descripcion=?, precio=?, stock=?, categoria_id=? WHERE id=?";
                     $stmt = $conn->prepare($sql);
-                    $stmt->bind_param("ssdiii", $nombre, $descripcion, $precio, $stock, $categoria_id, $id);
+                    $stmt->bind_param("ssdiii", $codigo, $nombre, $descripcion, $precio, $stock, $categoria_id, $id);
                 }
                 $stmt->execute();
                 
@@ -210,6 +212,7 @@ include '../includes/sidebar.php';
                         <thead>
                             <tr>
                                 <th>ID</th>
+                                <th>Código</th>
                                 <th>Nombre</th>
                                 <th>Categoría</th>
                                 <th>Precio</th>
@@ -222,6 +225,7 @@ include '../includes/sidebar.php';
                             <?php foreach ($productos as $prod): ?>
                             <tr>
                                 <td><?php echo $prod['id']; ?></td>
+                                <td><code><?php echo htmlspecialchars($prod['codigo']); ?></code></td>
                                 <td>
                                     <?php if ($prod['stock'] <= 5): ?>
                                         <i class="fas fa-exclamation-circle text-danger me-1"></i>
@@ -293,8 +297,10 @@ include '../includes/sidebar.php';
                     <input type="hidden" name="id" id="producto_id">
                     
                     <div class="mb-3">
-                        <label class="form-label">Nombre *</label>
-                        <input type="text" class="form-control" name="nombre" id="nombre" required>
+                        <label class="form-label">Código *</label>
+                        <input type="text" class="form-control" name="codigo" id="codigo" required 
+                            placeholder="Ej: ELEC-001, PROD-123">
+                        <small class="text-muted">Código único del producto (letras, números, guiones)</small>
                     </div>
                     
                     <div class="mb-3">
@@ -347,6 +353,7 @@ function editarProducto(producto) {
     document.getElementById('modalTitle').textContent = 'Editar Producto';
     document.getElementById('accion').value = 'editar';
     document.getElementById('producto_id').value = producto.id;
+    document.getElementById('codigo').value = producto.codigo || '';
     document.getElementById('nombre').value = producto.nombre;
     document.getElementById('descripcion').value = producto.descripcion || '';
     document.getElementById('categoria_id').value = producto.categoria_id;
