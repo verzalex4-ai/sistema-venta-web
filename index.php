@@ -24,12 +24,11 @@ $params = [];
 $types = '';
 
 if (!empty($busqueda)) {
-    $sql .= " AND (p.nombre LIKE ? OR p.codigo LIKE ? OR p.descripcion LIKE ?)";
+    $sql .= " AND (p.nombre LIKE ? OR p.descripcion LIKE ?)";
     $busqueda_param = "%$busqueda%";
     $params[] = &$busqueda_param;
     $params[] = &$busqueda_param;
-    $params[] = &$busqueda_param;
-    $types .= 'sss';
+    $types .= 'ss';
 }
 
 if (!empty($categoria_id)) {
@@ -550,16 +549,12 @@ $result = $stmt->get_result();
                                 <h5 class="product-title">
                                     <?php echo htmlspecialchars($producto['nombre'] ?? ''); ?>
                                 </h5>
-                                <p class="text-muted mb-2" style="font-size: 0.85rem;">
-                                    <strong>Código:</strong> <?php echo htmlspecialchars($producto['codigo'] ?? 'N/A'); ?>
-                                </p>
                                 <h4 class="text-success fw-bold mb-3">
                                     <?php echo formatear_precio($producto['precio'] ?? 0); ?>
                                 </h4>
-                                <?php if (!empty($producto['descripcion'])): ?>
+                                <?php if (esta_logueado() && (es_admin() || es_vendedor())): ?>
                                     <p class="text-muted mb-2" style="font-size: 0.85rem;">
-                                        <?php echo htmlspecialchars(substr($producto['descripcion'], 0, 80)); ?>
-                                        <?php echo strlen($producto['descripcion']) > 80 ? '...' : ''; ?>
+                                        <strong>Código:</strong> <code><?php echo htmlspecialchars($producto['codigo'] ?? 'N/A'); ?></code>
                                     </p>
                                 <?php endif; ?>
 

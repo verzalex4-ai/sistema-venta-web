@@ -404,8 +404,8 @@ $usuarios = $conn->query("SELECT * FROM usuarios ORDER BY id DESC");
                                             </td>
                                             <td>
                                                 <?php
-                                                if ($usuario['ultimo_acceso']) {
-                                                    echo date('d/m/Y H:i', strtotime($usuario['ultimo_acceso']));
+                                                if ($usuario['fecha_ultima_sesion']) {
+                                                    echo date('d/m/Y H:i', strtotime($usuario['fecha_ultima_sesion']));
                                                 } else {
                                                     echo '<span class="text-muted">Nunca</span>';
                                                 }
